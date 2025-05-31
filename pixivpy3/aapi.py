@@ -323,6 +323,22 @@ class AppPixivAPI(BasePixivAPI):
         r = self.no_auth_requests_call("GET", url, headers=headers, params=params, req_auth=req_auth)
         return self.parse_result(r)
 
+    # 作品收藏
+    def illust_bookmarks(
+        self,
+        illust_id: int | str,
+        offset: int | str | None = None,
+        req_auth: bool = True,
+    ) -> ParsedJson:
+        url = f"{self.hosts}/v1/illust/bookmark/users"
+        params = {
+            "illust_id": illust_id,
+        }
+        if offset:
+            params["offset"] = offset
+        r = self.no_auth_requests_call("GET", url, params=params, req_auth=req_auth)
+        return self.parse_result(r)
+    
     # 相关作品列表
     def illust_related(
         self,
