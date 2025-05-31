@@ -94,7 +94,12 @@ class AppPixivAPI(BasePixivAPI):
         headers_["Authorization"] = f"Bearer {self.access_token}"
         return self.requests_call(method, url, headers_, params, data)
 
+    def _response_check(self, res: Response):
+        if res.status_code == 400 and 'Access Token' in res.text:
+            raise PixivError('Access Token Invalid', header=res.headers, body=res.text) from None
+    
     def parse_result(self, res: Response) -> ParsedJson:
+        self._response_check(res)
         try:
             return self.parse_json(res.text)
         except Exception as e:  # noqa: BLE001
@@ -102,8 +107,8 @@ class AppPixivAPI(BasePixivAPI):
             raise PixivError(msg, header=res.headers, body=res.text) from None
 
     def _load_result(self, res: Response, model: type[ModelT], /) -> ModelT:
+        self._response_check(res)
         json_data = self.parse_result(res)
-
         try:
             return model.model_validate(json_data)
         except Exception as e:
