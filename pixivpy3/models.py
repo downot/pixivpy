@@ -143,7 +143,7 @@ class Profile(BasePixivpyModel):
     total_illust_bookmarks_public: int
     total_illust_series: int
     total_novel_series: int
-    background_image_url: str
+    background_image_url: Optional[str]
     twitter_account: str
     twitter_url: Optional[str]
     pawoo_url: Optional[str]
