@@ -930,6 +930,22 @@ class AppPixivAPI(BasePixivAPI):
         r = self.no_auth_requests_call("GET", url, params=params, req_auth=req_auth)
         return self.parse_result(r)
 
+    # Notification
+    def notification(
+        self,
+        limit: int | None = None,
+        older_than: str | None = None,
+        req_auth: bool = True,) -> ParsedJson:
+        url = f"{self.hosts}/v1/notification/list"
+        params = {}
+        if limit:
+            params["limit"] = limit
+        if older_than:
+            params["older_than"] = older_than
+
+        r = self.no_auth_requests_call("GET", url, params=params, req_auth=req_auth)
+        return self.parse_result(r)
+
     # 特辑详情 (无需登录,调用Web API)
     def showcase_article(self, showcase_id: int | str) -> ParsedJson:
         url = "https://www.pixiv.net/ajax/showcase/article"
