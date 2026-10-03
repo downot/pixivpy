@@ -442,6 +442,17 @@ for comment in json_result.comments:
         print(f"{comment.user.name} at {comment.date} : {comment.comment}")
 ```
 
+### Work Migration (export / re-upload works)
+
+Standalone scripts to export all works (illusts + novels) of one account and
+re-upload the illusts to another account, using the web AJAX API and browser
+cookies (`python3` + `requests` only; the optional reCAPTCHA solvers need
+`node` + Chrome): `export_works.py`, `upload_works.py`,
+`captcha_solver.mjs`, `captcha_human.mjs`.
+
+See [docs/work-migration.md](docs/work-migration.md) for full usage, the
+export layout, and the newly added web API reference.
+
 ## Develop Instructions
 
 ```sh
