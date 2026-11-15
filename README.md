@@ -442,16 +442,18 @@ for comment in json_result.comments:
         print(f"{comment.user.name} at {comment.date} : {comment.comment}")
 ```
 
-### Work Migration (export / re-upload works)
+### Account Migration (works, bookmarks & following)
 
-Standalone scripts to export all works (illusts + novels) of one account and
-re-upload the illusts to another account, using the web AJAX API and browser
-cookies (`python3` + `requests` only; the optional reCAPTCHA solvers need
-`node` + Chrome): `export_works.py`, `upload_works.py`,
-`captcha_solver.mjs`, `captcha_human.mjs`.
+Standalone scripts to migrate works, bookmarks (public & private, illusts &
+novels), and followed users (public & private) from one Pixiv account to
+another:
 
-See [docs/work-migration.md](docs/work-migration.md) for full usage, the
-export layout, and the newly added web API reference.
+- **Works**: `export_works.py`, `upload_works.py` (`captcha_solver.mjs`, `captcha_human.mjs`)
+- **Bookmarks**: `export_bookmarks.py`, `import_bookmarks.py` (standard library `python3` only)
+- **Following**: `export_following.py`, `import_following.py` (standard library `python3` only)
+
+See [docs/work-migration.md](docs/work-migration.md) for full usage, CLI
+options, export file layouts, and API references.
 
 ## Develop Instructions
 

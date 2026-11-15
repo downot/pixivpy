@@ -1,21 +1,26 @@
-# Work Migration (Export / Re-upload)
+# Account & Work Migration (Works, Bookmarks, Following)
 
-Export all works (illusts + novels) of a pixiv account and re-upload them to
-another account. The scripts are standalone and do not depend on the
-`pixivpy3` package: they need `python3` + `requests` only; the CAPTCHA
-solvers additionally require `node` and Google Chrome.
+Standalone tools to migrate a Pixiv account's **published works**, **bookmarks**
+(public & private, illusts & novels), and **followed users** (public & private)
+to another account.
 
-| File | Purpose |
-| --- | --- |
-| `export_works.py` | Export: list all works of the account, fetch details, download original images |
-| `upload_works.py` | Import: read an export directory and re-upload illusts to a target account |
-| `captcha_solver.mjs` | Automatic reCAPTCHA solver (CDP + LLM, headless) |
-| `captcha_human.mjs` | Human-in-the-loop reCAPTCHA solver (visible window, records labeled samples) |
+| File | Purpose | Dependencies |
+| --- | --- | --- |
+| `export_works.py` | Export all published works (illusts + novels) and download original images | `python3` + `requests` |
+| `upload_works.py` | Re-upload exported illusts to a target account | `python3` + `requests` (+ `node`/Chrome for CAPTCHA) |
+| `export_bookmarks.py` | Export all public & private bookmarks (illusts + novels + user bookmark tags) | `python3` stdlib only |
+| `import_bookmarks.py` | Import exported bookmarks into a target account (preserving public/private & order) | `python3` stdlib only |
+| `export_following.py` | Export all public & private followed users (including custom follow tags) | `python3` stdlib only |
+| `import_following.py` | Import exported followed users into a target account via AppAPI (`user_follow_add`) | `python3` stdlib only |
+| `captcha_solver.mjs` | Automatic reCAPTCHA solver for work creation (CDP + LLM, headless) | `node` + Chrome |
+| `captcha_human.mjs` | Human-in-the-loop reCAPTCHA solver (visible window, records labeled samples) | `node` + Chrome |
 
-The tools use the **web AJAX API** (`https://www.pixiv.net/ajax/...`) with
-browser `Cookie` authentication, independent of the OAuth App-API in
-`pixivpy3`. The newly used web APIs are summarized in
-[new web APIs](#new-web-apis).
+The tools primarily use the **web AJAX API** (`https://www.pixiv.net/ajax/...`)
+with browser `Cookie` authentication (`cookie_a.txt` for source, `cookie_b.txt`
+for target), while `import_following.py` uses Pixiv's **OAuth App-API**
+(`https://app-api.pixiv.net/v1/user/follow/add` via `token_b.txt`) because the
+web follow endpoint requires a per-request Google reCAPTCHA Enterprise token.
+All APIs are summarized in [API Reference](#new-web-apis).
 
 ## Setup
 
@@ -246,14 +251,150 @@ While you solve it, a labeled sample (numbered grid image + instruction + the
 cells you clicked + the LLM's answer to the same grid, for comparison) is
 saved to `/tmp/cdp/human_solves/` to calibrate the automatic solver.
 
+## Bookmarks Migration (export_bookmarks.py / import_bookmarks.py)
+
+Export all public (`rest=show` / `restrict=0`) and private (`rest=hide` / `restrict=1`)
+bookmarks (both **illusts/manga** and **novels**, plus custom bookmark tags) from
+the source account and import them into the target account. Both scripts rely
+only on the Python 3 standard library (`urllib.request`).
+
+### Export Bookmarks: `export_bookmarks.py`
+
+```bash
+# Export all public & private bookmarks (illusts + novels)
+python3 export_bookmarks.py --cookie-file cookie_a.txt
+
+# Only update/merge novel bookmarks into existing bookmarks.json
+python3 export_bookmarks.py --cookie-file cookie_a.txt --only-novels
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--cookie-file` | `cookie_a.txt` | source account cookie file |
+| `--user-id` | from PHPSESSID | source account user id |
+| `--out` | `export` | output root directory (`export/<user_id>/`) |
+| `--delay` | `0.8` | base delay between API calls (s, ±30% jitter) |
+| `--max-retries` | `4` | max retries per request |
+| `--skip-novels` | off | skip novel bookmarks |
+| `--only-novels` | off | only fetch novel bookmarks and merge into existing `bookmarks.json` |
+
+Output files under `export/<user_id>/`:
+- `bookmarks.json` — full combined payload (`summary`, `bookmark_tags`, `illusts.public`, `illusts.private`, `novels.public`, `novels.private`)
+- `bookmarks_illusts_public.json` / `bookmarks_illusts_private.json`
+- `bookmarks_novels_public.json` / `bookmarks_novels_private.json`
+
+Works that were deleted or made private by their original authors are flagged with
+`"is_deleted_or_inaccessible": true` and automatically skipped during import.
+
+### Import Bookmarks: `import_bookmarks.py`
+
+```bash
+# Test importing 1 bookmark first (oldest first, so final order matches source)
+python3 import_bookmarks.py --cookie-file cookie_b.txt --source export/15032614 --limit 1
+
+# Import all remaining bookmarks with human-like pacing
+python3 import_bookmarks.py --cookie-file cookie_b.txt --source export/15032614
+
+# Dry-run or filter by type / visibility
+python3 import_bookmarks.py --cookie-file cookie_b.txt --source export/15032614 --type illust --visibility private --dry-run
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--cookie-file` | `cookie_b.txt` | target account cookie file |
+| `--source` | `export/15032614` | export directory or `bookmarks.json` path |
+| `--type` | `all` | `all`, `illust`, or `novel` |
+| `--visibility` | `all` | `all`, `public`, or `private` |
+| `--order` | `oldest-first` | `oldest-first` (preserves original bookmark list order) or `newest-first` |
+| `--limit` | `0` | max bookmarks to import in this run (`0` = all pending) |
+| `--only` | none | only import a specific `work_id` |
+| `--min-delay` / `--max-delay` | `3.5` / `7.5` | random human-like interval range between requests (s) |
+| `--pause-every` | `20` | take a longer break every N imported bookmarks (`0` = disable) |
+| `--pause-min` / `--pause-max` | `15.0` / `30.0` | duration range of periodic breaks (s) |
+| `--dry-run` | off | preview items to import without calling API |
+
+Progress is tracked in `export/<source_uid>/import_bookmarks_state_<target_uid>.json`
+and resumes automatically across runs.
+
+---
+
+## Following Migration (export_following.py / import_following.py)
+
+Export all public (`rest=show`) and private (`rest=hide`) followed users from the
+source account and follow them on the target account. Both scripts rely only on
+the Python 3 standard library.
+
+### Export Following: `export_following.py`
+
+```bash
+python3 export_following.py --cookie-file cookie_a.txt
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--cookie-file` | `cookie_a.txt` | source account cookie file |
+| `--user-id` | from PHPSESSID | source account user id |
+| `--out` | `export` | output root directory (`export/<user_id>/`) |
+| `--limit` | `24` | page size per request (`offset` advances by `limit` up to `reported_total`) |
+| `--delay` | `0.8` | base delay between API calls (s, ±30% jitter) |
+
+Output files under `export/<user_id>/`:
+- `following.json` — full combined payload (`summary`, `follow_user_tags`, `following.public`, `following.private`)
+- `following_public.json` / `following_private.json`
+
+> Note: Pixiv's `/ajax/user/{uid}/following` `total` count includes deactivated/suspended
+> accounts, which Pixiv filters out of the per-page `users[]` array. `export_following.py`
+> advances `offset += limit` until `offset >= reported_total` so all active followed
+> users are exported.
+
+### Import Following: `import_following.py`
+
+Because Pixiv's web follow endpoint (`/bookmark_add.php`) requires a per-request
+Google reCAPTCHA Enterprise score token (`recaptcha_enterprise_score_token`),
+`import_following.py` uses Pixiv's official OAuth **App-API**
+(`POST https://app-api.pixiv.net/v1/user/follow/add`, matching
+`AppPixivAPI.user_follow_add` in `pixivpy3/aapi.py`).
+
+Save the target account's OAuth token in `token_b.txt` (plain `refresh_token` string
+or JSON `{"access_token": "...", "refresh_token": "..."}`, ignored by git):
+
+```bash
+# Test importing 1 followed user first
+python3 import_following.py --token-file token_b.txt --source export/15032614 --limit 1
+
+# Import all remaining followed users with human-like pacing
+python3 import_following.py --token-file token_b.txt --source export/15032614
+
+# Or pass token directly on CLI
+python3 import_following.py --refresh-token <REFRESH_TOKEN> --source export/15032614
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--token-file` | `token_b.txt` | file with target account `refresh_token` or OAuth JSON |
+| `--refresh-token` / `--access-token` | none | pass OAuth tokens directly via CLI |
+| `--source` | `export/15032614` | export directory or `following.json` path |
+| `--visibility` | `all` | `all`, `public`, or `private` |
+| `--order` | `oldest-first` | `oldest-first` (preserves original following list order) or `newest-first` |
+| `--limit` | `0` | max users to follow in this run (`0` = all pending) |
+| `--only` | none | only follow a specific `user_id` |
+| `--min-delay` / `--max-delay` | `3.5` / `7.5` | random human-like interval range between requests (s) |
+| `--pause-every` | `20` | take a longer break every N followed users (`0` = disable) |
+| `--pause-min` / `--pause-max` | `15.0` / `30.0` | duration range of periodic breaks (s) |
+| `--dry-run` | off | preview users to follow without calling API |
+
+Progress is tracked in `export/<source_uid>/import_following_state_<target_uid>.json`
+and resumes automatically across runs.
+
+---
+
 ## New web APIs
 
-Base URL: `https://www.pixiv.net`.
+Base URL: `https://www.pixiv.net` (and `https://app-api.pixiv.net` for App-API follow import).
 
 Common request headers: `cookie`, `x-user-id`, `referer` (the page the request
-originates from), `accept: application/json`; create requests additionally
-need `x-csrf-token` (a 32-hex token embedded in the `/illustration/create`
-page).
+originates from), `accept: application/json`; state-changing web requests
+additionally need `x-csrf-token` (a 32-hex token embedded in Pixiv HTML pages).
 
 Common response envelope: `{"error": bool, "message": str, "body": …}`; the
 tables below only describe `body`.
@@ -267,6 +408,11 @@ tables below only describe `body`.
 | GET | `/ajax/illust/{illust_id}` | Illust detail: `title`, `description`, `xRestrict`, `isOriginal`, `isLoginOnly`, `createDate`, `pageCount`, `width`/`height`, `illustType`, … |
 | GET | `/ajax/illust/{illust_id}/uploadedImages` | The originally uploaded images (by page order): `url`, `mimeType`, `byteLength` |
 | GET | `/ajax/novel/{novel_id}` | Novel detail: `title`, `content` (full text), `genre`, `language`, `wordCount`, `characterCount`, `tags`, … |
+| GET | `/ajax/user/{user_id}/illusts/bookmark/tags?lang=zh` | User's illust bookmark tags (`body.public[]`, `body.private[]`) |
+| GET | `/ajax/user/{user_id}/illusts/bookmarks?tag=&offset=0&limit=48&rest=show\|hide` | User's public (`rest=show`) or private (`rest=hide`) illust bookmarks (`body.works[]`, `body.total`) |
+| GET | `/ajax/user/{user_id}/novels/bookmark/tags?lang=zh` | User's novel bookmark tags (`body.public[]`, `body.private[]`) |
+| GET | `/touch/ajax/user/bookmarks?id={user_id}&type=novel&rest=show\|hide&p=1` | User's public or private novel bookmarks (`body.works[]` / `body.bookmarks[]`, `body.total`) |
+| GET | `/ajax/user/{user_id}/following?offset=0&limit=24&rest=show\|hide&tag=&acceptingRequests=0` | User's public (`rest=show`) or private (`rest=hide`) followed users (`body.users[]`, `body.total`, `body.followUserTags[]`) |
 
 ### Import
 
@@ -276,6 +422,9 @@ tables below only describe `body`.
 | GET | `/ajax/work/create/illustration/init` | Pre-create check: non-empty `body.request` means a creation is already in progress; `body.showCaptcha` means a CAPTCHA is required right now |
 | POST | `/ajax/work/create/illustration` | Create an illust (multipart/form-data); returns `body.convertKey` on success |
 | GET | `/ajax/work/create/illustration/progress?convertKey=…` | Poll conversion progress: `body.status`; on `COMPLETE`, `body.illustId` is the new work id; `FAILED` / `ERROR` / `TIMEOUT` / `CANCELLED` are failures |
+| POST | `/ajax/illusts/bookmarks/add` | Add illust bookmark (`application/json`: `{"illust_id": str, "restrict": 0\|1, "comment": str, "tags": list[str]}`); returns `body.last_bookmark_id` |
+| POST | `/ajax/novels/bookmarks/add` | Add novel bookmark (`application/json`: `{"novel_id": str, "restrict": 0\|1, "comment": str, "tags": list[str]}`); returns `body` (new bookmark id) |
+| POST | `https://app-api.pixiv.net/v1/user/follow/add` | Follow a user via OAuth App-API (`Bearer <access_token>`, form body `user_id=<id>&restrict=public\|private`) |
 
 Create request field list (values per the field mapping table above):
 
